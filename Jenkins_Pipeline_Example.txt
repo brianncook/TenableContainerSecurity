@@ -7,7 +7,7 @@ node {
         env.WASSCANID = "Enter Vulnerbaility Management Scan ID here"
         env.SCAN_NAME = "Enter name of report to be generated here"
         env.SCAN_TARGET = "Enter target FQDN here"
-        env.SCANNER = "lgstash.localdomain"
+        env.SCANNER = "Name of Tenable.io scanner to use"
         stage('Preparation') {
             echo 'Getting code from repository.'
             // Modify the following to the appropriate Bitbucket 
