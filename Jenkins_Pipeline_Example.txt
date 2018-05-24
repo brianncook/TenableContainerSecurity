@@ -1,0 +1,82 @@
+node {
+    try {
+        env.REPO = "Enter repository name here"
+        env.IMAGE = "Enter image name here"
+        env.TIOCS_RESULTS = "tiocs.txt"
+        env.VMSCANID = "Enter Vulnerbaility Management Scan ID here"
+        env.WASSCANID = "Enter Vulnerbaility Management Scan ID here"
+        env.SCAN_NAME = "Enter name of report to be generated here"
+        env.SCAN_TARGET = "Enter target FQDN here"
+        env.SCANNER = "lgstash.localdomain"
+        stage('Preparation') {
+            echo 'Getting code from repository.'
+            // Modify the following to the appropriate Bitbucket 
+            git credentialsId: 'Bitbucket', url: 'https://bitbucket.org/{Replace with Bitbucket Repo}.git'
+        }
+        stage('Build') {
+            notifyStarted()
+            echo "Starting docker image build."
+            docker.build("${env.REPO}/${env.IMAGE}:${env.BUILD_NUMBER}")
+        }
+        stage('Test - Code and Image') {
+            echo 'Starting tests of code and Docker image.'
+            withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: 'T.ioCS',
+            usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD']]) {
+                IMAGE_ID = sh (returnStdout: true, script: "docker images ${env.REPO}/${env.IMAGE}:${env.BUILD_NUMBER} --format {{.ID}}").trim()
+                sh """
+                csup --access-key $USERNAME --secret-key $PASSWORD upload ${IMAGE_ID} -T ${env.BUILD_NUMBER} -N ${env.REPO}/${env.IMAGE} -rp | sed 's/\\x1b\\[[0-9;]*m//g' > ${env.TIOCS_RESULTS}
+                """
+                def POLICY_STATUS = sh (returnStdout: true, script: "awk '/Compliance Status/ {print \$3}' ${env.TIOCS_RESULTS}").trim()
+                def RISK_SCORE = sh (returnStdout: true, script: "awk '/Risk Score/ {print \$3}' ${env.TIOCS_RESULTS}").trim()
+                echo "$POLICY_STATUS"
+                echo "$RISK_SCORE"
+                if (POLICY_STATUS == "FAIL" ) {
+                    currentBuild.result = 'FAILURE'
+                    echo "The image did not pass the Tenable Container Security policy based on CVSS risk level."
+                    echo "The current build result: ${currentBuild.result}"
+                    echo "The CVSS aggregate risk score for the image: $RISK_SCORE."
+                return
+                }
+            }
+        }
+        stage('QA - Deployement') {
+            echo 'Deploying image to QA node'
+            sh """
+                docker run docker service create --constraint node.labels.env==dev --hostname bricks --name ${env.IMAGE} --network nginx-proxy -e VIRTUAL_HOST=qa-${env.IMAGE}.localdomain -e VIRTUAL_PORT=80 ${env.REPO}/${env.IMAGE}:${env.BUILD_NUMBER}
+            """
+        }
+        stage('QA - Testing') {
+            echo 'Starting tests of code and Docker image.'
+            withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: 'T.ioCS',
+            usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD']]) {
+                     sh """
+                     /usr/bin/python /scm/python/tioScan.py $USERNAME $PASSWORD ${env.VMSCANID} ${env.IMAGE}
+                     /usr/bin/python /scm/python/tioScan.py $USERNAME $PASSWORD ${env.WASSCANID} ${env.IMAGE}
+                     """
+            }
+        }
+        stage('Production') {
+            echo 'Deploying image to produciton node'
+            // Run Docker image on Docker swarm with node label env==prod
+            sh "docker service create --constraint node.labels.env=prod --name ${env.IMAGE} -p 80:80 ${env.REPO}/${env.IMAGE}:${env.BUILD_NUMBER}"
+        }
+    } finally {
+            archiveArtifacts artifacts: 'tiocs.txt', fingerprint: true
+            deleteDir() /* clean up our workspace */
+    }
+}
+
+def notifyStarted() {    
+    slackSend (channel: '#builds', color: '#00A5B5', message: "'Build Started: Jenkinsfile ${env.JOB_NAME} ${env.BUILD_NUMBER}'")
+    bitbucketStatusNotify (buildState: 'INPROGRESS')
+}
+
+def notifySuccess() {
+    slackSend (channel: '#builds', color: '#3FAE49', message: "'Build Started: Jenkinsfile ${env.JOB_NAME} ${env.BUILD_NUMBER} Notify Test Success'")
+    bitbucketStatusNotify (buildState: 'SUCCESS')   
+}
+
+def notifyFailure() {
+    slackSend (channel: '#builds', color: '#FF8300', message: "'Build Started: Jenkinsfile ${env.JOB_NAME} ${env.BUILD_NUMBER} Notify Test Failure'")
+    bitbucketStatusNotify (buildState: 'FAILED')   
+}
