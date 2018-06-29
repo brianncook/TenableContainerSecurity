@@ -24,6 +24,6 @@ do
   id=$(docker images $i --format "{{.ID}}")
   number=$(docker images $i --format "{{.Tag}}")
   name=$(docker images $i --format "{{.Repository}}")  
-  csup --access-key $ACCESS --secret-key $SECRET upload $id -T $number -N base/$name -rp > /scm/results/$name_$tag.txt
+  csup --access-key $ACCESS --secret-key $SECRET upload $id -T $number -N base/$name -rp > /scm/results/$id_csupPolicy.txt
   csup --access-key $ACCESS --secret-key $SECRET policy $id
 done 
