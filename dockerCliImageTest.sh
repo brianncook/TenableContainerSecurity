@@ -31,5 +31,5 @@ do
   docker tag $i registry.cloud.tenable.com/base/$i
   docker login -u $ACCESS -p $SECRET registry.cloud.tenable.com
   docker push registry.cloud.tenable.com/base/$i
-  curl -H "X-ApiKeys: accessKey=$ACCESS; secretKey=$SECRET" https://cloud.tenable.com/container-security/api/v1/reports/by_image?image_id=$id | jq '.' > /scm/results/$i.txt
+  curl -H "X-ApiKeys: accessKey=$ACCESS; secretKey=$SECRET" https://cloud.tenable.com/container-security/api/v1/reports/by_image?image_id=$id | jq '.' > /scm/results/$i_dockercli.txt
 done
