@@ -19,7 +19,7 @@ node {
             usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD']]) {
                 IMAGE_ID = sh (returnStdout: true, script: "docker images ${env.REPO}/${env.IMAGE}:${env.BUILD_NUMBER} --format {{.ID}}").trim()
                 sh """
-                csup --access-key $USERNAME --secret-key $PASSWORD upload ${IMAGE_ID} -T ${env.BUILD_NUMBER} -N ${env.REPO}/${env.IMAGE} -rp | sed 's/\\x1b\\[[0-9;]*m//g' > ${env.TIOCS_RESULTS}
+                csup --access-key $USERNAME --secret-key $PASSWORD upload ${IMAGE_ID} -T ${env.BUILD_NUMBER} -N ${env.REPO}/${env.IMAGE} -rp --no-color > ${env.TIOCS_RESULTS}
                 cp ${env.TIOCS_RESULTS} '/var/lib/jenkins/jobs/${JOB_NAME}/builds/${env.BUILD_NUMBER}'
                 """
                 def POLICY_STATUS = sh (returnStdout: true, script: "awk '/Compliance Status/ {print \$3}' ${env.TIOCS_RESULTS}").trim()
