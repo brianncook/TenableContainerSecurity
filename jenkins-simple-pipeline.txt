@@ -1,0 +1,20 @@
+node {
+    try {
+        env.REPO = "jenkins_demo"
+        env.IMAGE = "nginx"
+        env.TIOCS_RESULTS = "tiocs.txt"
+        stage('Preparation') {
+            echo 'Getting code from repository.'
+            checkout filesystem(clearWorkspace: false, copyHidden: false, path: '/scm/jenkins-simple-pipeline')
+        }
+        stage('Build') {
+            echo "Starting docker image build."
+            withDockerServer([uri: "unix:///var/run/docker.sock"]) {
+                docker.build("${env.REPO}/${env.IMAGE}:${env.BUILD_NUMBER}")
+            }
+        }
+    }
+    finally {
+            archiveArtifacts artifacts: 'tiocs.txt', fingerprint: true
+    }
+}
