@@ -1,6 +1,6 @@
 node {
     try {
-        env.REPO = "jenkins_demo"
+        env.REPO = "jenkins_simple_pipeline"
         env.IMAGE = "nginx"
         env.TIOCS_RESULTS = "tiocs.txt"
         stage('Preparation') {
@@ -11,6 +11,26 @@ node {
             echo "Starting docker image build."
             withDockerServer([uri: "unix:///var/run/docker.sock"]) {
                 docker.build("${env.REPO}/${env.IMAGE}:${env.BUILD_NUMBER}")
+            }
+        }
+        stage('Test - Code and Image') {
+            echo 'Starting tests of code and Docker image.'
+            withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: 'T.ioCS',
+            usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD']]) {
+                IMAGE_ID = sh (returnStdout: true, script: "docker images ${env.REPO}/${env.IMAGE}:${env.BUILD_NUMBER} --format {{.ID}}").trim()
+                sh """
+                csup --access-key $USERNAME --secret-key $PASSWORD upload ${IMAGE_ID} -T ${env.BUILD_NUMBER} -N ${env.REPO}/${env.IMAGE} -rp | sed 's/\\x1b\\[[0-9;]*m//g' > ${env.TIOCS_RESULTS}
+                cp ${env.TIOCS_RESULTS} '/var/lib/jenkins/jobs/${JOB_NAME}/builds/${env.BUILD_NUMBER}'
+                """
+                def POLICY_STATUS = sh (returnStdout: true, script: "awk '/Compliance Status/ {print \$3}' ${env.TIOCS_RESULTS}").trim()
+                def RISK_SCORE = sh (returnStdout: true, script: "awk '/Risk Score/ {print \$3}' ${env.TIOCS_RESULTS}").trim()
+                if (POLICY_STATUS == "FAIL" ) {
+                    currentBuild.result = 'FAILURE'
+                    echo "The image did not pass the Tenable Container Security policy based on CVSS risk level."
+                    echo "The current build result: ${currentBuild.result}"
+                    echo "The CVSS aggregate risk score for the image: $RISK_SCORE."
+                    return
+                }
             }
         }
     }
