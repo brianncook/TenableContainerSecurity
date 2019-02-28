@@ -1,0 +1,36 @@
+dockerImages=( "node:6.16.0-jessie" )
+
+for i in "${dockerImages[@]}"
+do
+  echo "Pull down image $i."
+  docker pull $i
+  number=$(docker images $i --format "{{.Tag}}")
+  id=$(docker images $i --format "{{.ID}}")
+  
+  # Run the image through the Tenable Container Security Scanner image.
+  docker save $i | docker run \
+  -e TENABLE_ACCESS_KEY=$USER_NAME \
+  -e TENABLE_SECRET_KEY=$USER_PASSWORD \
+  -e IMPORT_REPO_NAME=jenkins \
+  -i tenableio-docker-consec-local.jfrog.io/cs-scanner:latest inspect-image $i
+  
+  # Pull report of test.
+  curl -H "X-ApiKeys: accessKey=$USER_NAME; secretKey=$USER_PASSWORD" https://cloud.tenable.com/container-security/api/v1/reports/by_image?image_id=$id | jq '.' > $i-results.txt
+  
+  # Pull policy status.
+  policy=$(curl -H "X-ApiKeys: accessKey=$USER_NAME; secretKey=$USER_PASSWORD" https://cloud.tenable.com/container-security/api/v1/reports/by_image?image_id=$id | jq '.')
+
+  # Check to see if image has failed the policy and if so, exit the build.
+  if [ "$policyStatus" == "FAIL" ]; then
+    echo "Tenable.io Container Security test reports the image has failed the one or more policies"
+    echo "that were created. Please review the vulnerabilities that failed the test, correct, and rerun the job."
+    echo "Thank you."
+    exit 1
+  fi
+  else
+    # If the policy status is other than pass or fail, inform user that an issue might exist.
+    echo "The returned policy status was not pass or fail By Tenable Container Security."
+    echo "The result returned is: " $policyStatus
+    echo "Please contact Tenable support."
+    exit 2
+fi
