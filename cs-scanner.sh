@@ -1,6 +1,6 @@
 #!/bin/sh
 
-dockerImages=( {list docker local docker images and versions )
+dockerImages=( {list docker local docker images and versions} )
 
 for i in "${dockerImages[@]}"
 do
