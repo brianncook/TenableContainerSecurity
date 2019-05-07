@@ -1,0 +1,73 @@
+pipeline {
+    
+agent any
+
+environment {
+    REPO = "jenkins_demo"
+    IMAGE = "nginx"
+    TENABLEIO = "https://cloud.tenable.com/container-security/api/v1" 
+    TIOCS_RESULTS = "tiocs.txt"
+}
+
+options {
+    timestamps()
+}
+    
+stages{
+    stage('Preperation') {
+        steps {
+            slackSend (channel: '#jenkins_build', tokenCredentialId: 'Notice2Slack', color: '#00A5B5', message: "'Build Started: ${env.JOB_NAME} ${env.BUILD_NUMBER}'")
+            git credentialsId: 'Bitbucket2', url: 'https://bncook@bitbucket.org/bncook/docker-nginx.git'
+        }
+    }
+    stage('Builid'){
+        steps {
+            script {
+                docker.build('$REPO/$IMAGE:$BUILD_NUMBER')
+            }
+        }
+    }
+    stage('Test Image for Risk') {
+        steps {
+            script {
+                withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: 'T.io',
+                usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD']]) {
+                    IMAGE_ID = sh (returnStdout: true, script: """docker images $REPO/$IMAGE:$BUILD_NUMBER --format {{.ID}}""").trim()
+                    sh """
+                    docker save $IMAGE_ID | docker run -e TENABLE_ACCESS_KEY=$USERNAME \
+                    -e TENABLE_SECRET_KEY=$PASSWORD \
+                    -e IMPORT_REPO_NAME=base \
+                    -i tenableio-docker-consec-local.jfrog.io/cs-scanner:1.3.4 inspect-image $REPO/$IMAGE:$BUILD_NUMBER 
+                    
+                    sleep 30
+                    
+                    curl -H "X-ApiKeys: accessKey=$USERNAME; secretKey=$PASSWORD" \
+                    https://cloud.tenable.com/container-security/api/v1/reports/by_image?image_id=${IMAGE_ID} | jq '.' > $IMAGE-${env.TIOCS_RESULTS}
+                    """
+                    string POLICY_STATUS = sh (returnStdout: true, script: """curl -H "X-ApiKeys: accessKey=$USERNAME; secretKey=$PASSWORD" $TENABLEIO/policycompliance?image_id=$IMAGE_ID | jq -r "."status""").trim() as String
+                    RISK_SCORE = readJSON(file: "$IMAGE-$TIOCS_RESULTS").report.risk_score
+                    MALWARE = readJSON(file: "$IMAGE-$TIOCS_RESULTS").report.malware
+                    UNWANTED_PROGRAMS = readJSON(file: "$IMAGE-$TIOCS_RESULTS").report.potentially_unwanted_programs
+                }
+                if ( POLICY_STATUS == "pass" ){
+                    echo "All is Good."
+                    echo "Risk Score is $RISK_SCORE"
+                    echo "Malware: $MALWARE"
+                    echo "Unwanted Programs: $UNWANTED_PROGRAMS"
+                    slackSend (channel: '#jenkins_build', tokenCredentialId: 'Notice2Slack', color: '#00A5B5', message: "'Tenable.ioCS Test Results: ${env.JOB_NAME} Risk Score: $RISK_SCORE Malware: $MALWARE Unwanted Programs: $UNWANTED_PROGRAMS'")
+
+                } else {
+                    echo "All is BAD."
+                    echo "Risk Score is $RISK_SCORE"
+                }
+        }
+    }
+}
+
+}
+post {
+    always {
+        archiveArtifacts artifacts: "$IMAGE-$TIOCS_RESULTS", fingerprint: true, onlyIfSuccessful: true
+    }
+}
+}
